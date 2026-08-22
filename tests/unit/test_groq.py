@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -10,31 +10,38 @@ from querymind.llm.client import ChatMessage, Role, ToolDefinition
 from querymind.llm.groq import GroqProvider
 
 
-def test_validate_config_missing_key() -> None:
-    provider = GroqProvider(api_key="", model="test-model")
+def test_validate_config_missing_keys() -> None:
+    provider = GroqProvider(api_keys=[], model="test-model")
     assert provider.validate_config() is False
 
 
-def test_validate_config_with_key() -> None:
-    provider = GroqProvider(api_key="gsk_test_key", model="test-model")
+def test_validate_config_with_single_key() -> None:
+    provider = GroqProvider(api_keys=["gsk_test_key"], model="test-model")
+    assert provider.validate_config() is True
+
+
+def test_validate_config_with_multiple_keys() -> None:
+    provider = GroqProvider(
+        api_keys=["gsk_key1", "gsk_key2", "gsk_key3"], model="test-model"
+    )
     assert provider.validate_config() is True
 
 
 def test_validate_config_missing_model() -> None:
-    provider = GroqProvider(api_key="gsk_test_key", model="")
+    provider = GroqProvider(api_keys=["gsk_test_key"], model="")
     assert provider.validate_config() is True
 
 
 @pytest.mark.asyncio
 async def test_chat_raises_without_config() -> None:
-    provider = GroqProvider(api_key="", model="test-model")
+    provider = GroqProvider(api_keys=[], model="test-model")
     with pytest.raises(ValueError, match="not configured"):
         await provider.chat(messages=[ChatMessage(role=Role.USER, content="hi")])
 
 
 @pytest.mark.asyncio
 async def test_chat_basic_response() -> None:
-    provider = GroqProvider(api_key="gsk_test_key", model="test-model")
+    provider = GroqProvider(api_keys=["gsk_test_key"], model="test-model")
 
     mock_message = MagicMock()
     mock_message.content = "Hello from Groq"
@@ -56,7 +63,7 @@ async def test_chat_basic_response() -> None:
     mock_client = AsyncMock()
     mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-    with patch.object(provider, "_get_client", return_value=mock_client):
+    with patch_next_client(provider, mock_client):
         result = await provider.chat(
             messages=[ChatMessage(role=Role.USER, content="Hello")]
         )
@@ -69,7 +76,7 @@ async def test_chat_basic_response() -> None:
 
 @pytest.mark.asyncio
 async def test_chat_with_tool_calls() -> None:
-    provider = GroqProvider(api_key="gsk_test_key", model="test-model")
+    provider = GroqProvider(api_keys=["gsk_test_key"], model="test-model")
 
     mock_func = MagicMock()
     mock_func.name = "send_http_request"
@@ -95,7 +102,7 @@ async def test_chat_with_tool_calls() -> None:
     mock_client = AsyncMock()
     mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-    with patch.object(provider, "_get_client", return_value=mock_client):
+    with patch_next_client(provider, mock_client):
         result = await provider.chat(
             messages=[ChatMessage(role=Role.USER, content="Call the tool")],
             tools=[ToolDefinition(name="send_http_request", description="desc")],
@@ -109,7 +116,7 @@ async def test_chat_with_tool_calls() -> None:
 
 @pytest.mark.asyncio
 async def test_chat_with_tools_in_payload() -> None:
-    provider = GroqProvider(api_key="gsk_test_key", model="test-model")
+    provider = GroqProvider(api_keys=["gsk_test_key"], model="test-model")
 
     mock_message = MagicMock()
     mock_message.content = "I don't need tools right now"
@@ -129,7 +136,7 @@ async def test_chat_with_tools_in_payload() -> None:
 
     tools = [ToolDefinition(name="my_tool", description="A test tool")]
 
-    with patch.object(provider, "_get_client", return_value=mock_client):
+    with patch_next_client(provider, mock_client):
         result = await provider.chat(
             messages=[ChatMessage(role=Role.USER, content="Hello")],
             tools=tools,
@@ -142,3 +149,43 @@ async def test_chat_with_tools_in_payload() -> None:
     assert call_kwargs["max_tokens"] == 100
     assert len(call_kwargs["tools"]) == 1
     assert result.content == "I don't need tools right now"
+
+
+@pytest.mark.asyncio
+async def test_round_robin_rotation() -> None:
+    """Verify that multiple keys create multiple clients and rotate."""
+    provider = GroqProvider(
+        api_keys=["gsk_key1", "gsk_key2", "gsk_key3"], model="test-model"
+    )
+    assert len(provider._clients) == 3
+
+    clients_seen: list[int] = []
+    original_clients = provider._clients
+
+    for _ in range(6):
+        client = provider._next_client()
+        idx = original_clients.index(client)
+        clients_seen.append(idx)
+
+    assert clients_seen == [0, 1, 2, 0, 1, 2]
+
+
+class _ClientPatcher:
+    """Context manager to patch _next_client for testing."""
+
+    def __init__(self, provider: GroqProvider, mock_client: AsyncMock) -> None:
+        self._provider = provider
+        self._mock_client = mock_client
+        self._original_clients = provider._clients
+
+    def __enter__(self) -> _ClientPatcher:
+        self._provider._clients = [self._mock_client]
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self._provider._clients = self._original_clients
+
+
+def patch_next_client(provider: GroqProvider, mock_client: AsyncMock) -> _ClientPatcher:
+    """Create a context manager that patches the provider's next client."""
+    return _ClientPatcher(provider, mock_client)

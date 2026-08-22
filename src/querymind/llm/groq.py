@@ -1,7 +1,8 @@
-"""Groq LLM provider implementation."""
+"""Groq LLM provider implementation with round-robin key rotation."""
 
 from __future__ import annotations
 
+import itertools
 import json
 import logging
 from typing import Any
@@ -22,29 +23,39 @@ logger = logging.getLogger(__name__)
 
 
 class GroqProvider(LLMProvider):
-    """Groq API provider.
+    """Groq API provider with round-robin API key rotation.
 
-    Wraps the AsyncGroq client behind the provider-agnostic LLMProvider
-    interface so the rest of the application never depends on Groq directly.
+    Supports multiple API keys for higher throughput. Keys are rotated
+    on each request in round-robin fashion. If only one key is provided,
+    it behaves like a standard single-key provider.
     """
 
-    def __init__(self, api_key: str, model: str) -> None:
-        self._api_key = api_key
+    def __init__(self, api_keys: list[str], model: str) -> None:
+        self._api_keys = api_keys
         self._model = model
-        self._client: AsyncGroq | None = None
+        self._clients: list[AsyncGroq] = [
+            AsyncGroq(api_key=key) for key in api_keys
+        ]
+        self._key_cycle: Any = (
+            itertools.cycle(range(len(api_keys))) if api_keys else iter([])
+        )
+        logger.info(
+            "GroqProvider initialized with %d API key(s), model=%s",
+            len(api_keys),
+            model,
+        )
 
     def validate_config(self) -> bool:
-        """Check that the API key is set."""
-        if not self._api_key:
-            logger.warning("Groq API key is not configured")
+        """Check that at least one API key is set."""
+        if not self._api_keys:
+            logger.warning("No Groq API keys configured")
             return False
         return True
 
-    def _get_client(self) -> AsyncGroq:
-        """Return the async client, creating it lazily."""
-        if self._client is None:
-            self._client = AsyncGroq(api_key=self._api_key)
-        return self._client
+    def _next_client(self) -> AsyncGroq:
+        """Get the next client in round-robin order."""
+        idx = next(self._key_cycle)
+        return self._clients[idx]  # pyright: ignore[reportUnknownVariableType]
 
     async def chat(
         self,
@@ -55,22 +66,12 @@ class GroqProvider(LLMProvider):
     ) -> ChatResponse:
         """Send a chat completion request to Groq.
 
-        Args:
-            messages: Conversation history.
-            tools: Optional tool definitions.
-            temperature: Sampling temperature.
-            max_tokens: Maximum response tokens.
-
-        Returns:
-            A structured ChatResponse.
-
-        Raises:
-            ValueError: If the provider is not configured.
+        Rotates through API keys on each call for load distribution.
         """
         if not self.validate_config():
-            raise ValueError("Groq provider is not configured. Set GROQ_API_KEY.")
+            raise ValueError("Groq provider is not configured. Set GROQ_API_KEYS.")
 
-        client = self._get_client()
+        client = self._next_client()
 
         payload: dict[str, Any] = {
             "model": self._model,
