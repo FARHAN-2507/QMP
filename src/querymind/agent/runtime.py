@@ -15,6 +15,7 @@ from querymind.config.settings import settings
 from querymind.llm.client import LLMProvider
 from querymind.tools.discovery import DiscoverApi
 from querymind.tools.executor import ToolExecutor
+from querymind.tools.generator import GenerateTests
 from querymind.tools.http import SendHttpRequest
 from querymind.tools.mock import GetCurrentTestEnvironment
 from querymind.tools.openapi import ImportOpenApi
@@ -56,6 +57,7 @@ class AgentRuntime:
         self._registry.register(ImportOpenApi())
         self._registry.register(DiscoverApi())
         self._registry.register(RunTest())
+        self._registry.register(GenerateTests())
 
     @property
     def registry(self) -> ToolRegistry:
