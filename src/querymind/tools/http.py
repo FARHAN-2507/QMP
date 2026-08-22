@@ -11,11 +11,15 @@ from typing import Any
 
 import httpx
 
+from querymind.security.provider import AuthProvider
 from querymind.tools.base import Tool, ToolResult, ToolStatus
 
 
 class SendHttpRequest(Tool):
     """Send an HTTP request to a target API."""
+
+    def __init__(self, auth_provider: AuthProvider | None = None) -> None:
+        self._auth_provider = auth_provider
 
     @property
     def name(self) -> str:
@@ -64,6 +68,10 @@ class SendHttpRequest(Tool):
         headers = arguments.get("headers", {})
         body = arguments.get("body")
         timeout = arguments.get("timeout", 30)
+
+        # Apply auth headers if configured
+        if self._auth_provider:
+            headers = self._auth_provider.apply_auth(headers, url)
 
         try:
             start = time.monotonic()

@@ -7,6 +7,7 @@ It's deterministic: same input → same output.
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING
 
 import httpx
 
@@ -18,14 +19,26 @@ from querymind.testing.models import (
     TestStatus,
 )
 
+if TYPE_CHECKING:
+    from querymind.security.provider import AuthProvider
 
-async def run_test(test_case: ApiTestCase) -> ApiTestResult:
+
+async def run_test(
+    test_case: ApiTestCase,
+    auth_provider: AuthProvider | None = None,
+) -> ApiTestResult:
     """Execute a single test case.
 
     Sends the HTTP request, evaluates all assertions, and returns
     a structured ApiTestResult.
     """
     req = test_case.request
+
+    # Apply auth headers if configured
+    headers = dict(req.headers)
+    if auth_provider:
+        headers = auth_provider.apply_auth(headers, req.url)
+
     try:
         start = time.monotonic()
         async with httpx.AsyncClient(
@@ -34,7 +47,7 @@ async def run_test(test_case: ApiTestCase) -> ApiTestResult:
             response = await client.request(
                 method=req.method,
                 url=req.url,
-                headers=req.headers,
+                headers=headers,
                 json=req.body,
             )
         elapsed_ms = int((time.monotonic() - start) * 1000)
@@ -95,10 +108,13 @@ async def run_test(test_case: ApiTestCase) -> ApiTestResult:
         )
 
 
-async def run_test_suite(test_cases: list[ApiTestCase]) -> list[ApiTestResult]:
+async def run_test_suite(
+    test_cases: list[ApiTestCase],
+    auth_provider: AuthProvider | None = None,
+) -> list[ApiTestResult]:
     """Execute a list of test cases and return all results."""
     results: list[ApiTestResult] = []
     for tc in test_cases:
-        result = await run_test(tc)
+        result = await run_test(tc, auth_provider=auth_provider)
         results.append(result)
     return results

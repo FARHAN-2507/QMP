@@ -21,6 +21,9 @@ from querymind.tools.base import Tool, ToolResult, ToolStatus
 class RunTest(Tool):
     """Run a single test case against an API endpoint."""
 
+    def __init__(self, auth_provider: Any | None = None) -> None:
+        self._auth_provider = auth_provider
+
     @property
     def name(self) -> str:
         return "run_test"
@@ -126,7 +129,7 @@ class RunTest(Tool):
                 assertions=assertions,  # pyright: ignore[reportUnknownArgumentType]
             )
 
-            result = await run_test(test_case)
+            result = await run_test(test_case, auth_provider=self._auth_provider)
 
             return ToolResult(
                 status=ToolStatus.SUCCESS,
