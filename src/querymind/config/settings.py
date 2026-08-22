@@ -11,6 +11,7 @@ class Settings(BaseSettings):
 
     environment: str = Field(default="development", alias="QUERYMIND_ENVIRONMENT")
     max_agent_iterations: int = Field(default=20, alias="QUERYMIND_MAX_AGENT_ITERATIONS")
+    max_history_messages: int = Field(default=50, alias="QUERYMIND_MAX_HISTORY_MESSAGES")
     http_timeout_seconds: int = Field(default=30, alias="QUERYMIND_HTTP_TIMEOUT_SECONDS")
 
     groq_api_keys: str = Field(default="", alias="GROQ_API_KEYS")
@@ -18,6 +19,13 @@ class Settings(BaseSettings):
 
     mongodb_connection_string: str = Field(default="", alias="MONGODB_CONNECTION_STRING")
     mongodb_database_name: str = Field(default="QueryMind", alias="MONGODB_DATABASE_NAME")
+
+    data_dir: str = Field(default="~/.querymind", alias="QUERYMIND_DATA_DIR")
+    session_ttl_days: int = Field(default=30, alias="QUERYMIND_SESSION_TTL_DAYS")
+    report_output_dir: str = Field(default="~/Downloads", alias="QUERYMIND_REPORT_OUTPUT_DIR")
+    auth_config_path: str = Field(
+        default="~/.querymind/.auth.json", alias="QUERYMIND_AUTH_CONFIG_PATH"
+    )
 
     @property
     def groq_api_key_list(self) -> list[str]:

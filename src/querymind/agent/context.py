@@ -6,6 +6,8 @@ current state and configuration.
 
 from __future__ import annotations
 
+from typing import Any
+
 from querymind.llm.client import ChatMessage, ToolDefinition
 from querymind.tools.registry import ToolRegistry
 
@@ -18,6 +20,8 @@ CAPABILITIES:
 - Discover API endpoints by probing common paths
 - Generate test cases from API definitions
 - Run tests with assertions (status code, headers, JSON properties, response time)
+- Generate HTML test reports
+- Configure authentication for target APIs
 - Answer general questions
 
 BEHAVIOR:
@@ -25,6 +29,14 @@ BEHAVIOR:
 - For API testing: use tools to investigate, then report findings
 - Keep responses short and clear
 - Use markdown formatting in your final answer
+
+AUTHENTICATION:
+- Use configure_auth to set up authentication for target APIs
+- Supported types: API key, Bearer token, Basic auth, OAuth 2.0
+- Once configured, auth headers are automatically applied to all requests
+- Use list_auth to see configured authentication
+- Use clear_auth to remove authentication for an API
+- Do NOT manually include Authorization headers when auth is configured
 
 WORKFLOW FOR TESTING AN API:
 1. If you have an OpenAPI spec URL, import it with import_openapi
@@ -54,6 +66,13 @@ TEST GENERATION STRATEGY:
 - Check response time is reasonable
 - Verify response structure matches schema
 
+REPORT GENERATION:
+- After running tests, offer to generate a report
+- Use generate_report tool with the test results
+- Default save location: ~/Downloads/
+- Reports are self-contained HTML files
+- Ask user where to save, or use default
+
 RULES:
 - Never guess. Use tools to verify.
 - Be specific about what you found.
@@ -69,13 +88,20 @@ class AgentContext:
         self,
         tool_registry: ToolRegistry,
         system_prompt: str | None = None,
+        auth_provider: Any | None = None,
     ) -> None:
         self._tool_registry = tool_registry
         self._system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
+        self._auth_provider = auth_provider
 
     def get_system_prompt(self) -> str:
-        """Return the system prompt."""
-        return self._system_prompt
+        """Return the system prompt with auth summary."""
+        prompt = self._system_prompt
+        if self._auth_provider:
+            auth_summary = self._auth_provider.get_auth_summary()
+            if auth_summary and auth_summary != "No authentication configured.":
+                prompt += f"\n\n{auth_summary}"
+        return prompt
 
     def get_tool_definitions(self) -> list[ToolDefinition]:
         """Return tool definitions for the LLM."""
@@ -101,7 +127,7 @@ class AgentContext:
 
         has_system = messages and messages[0].role.value == "system"
         if not has_system:
-            result.append(ChatMessage(role="system", content=self._system_prompt))  # type: ignore[arg-type]
+            result.append(ChatMessage(role="system", content=self.get_system_prompt()))  # type: ignore[arg-type]
 
         result.extend(messages)
         return result

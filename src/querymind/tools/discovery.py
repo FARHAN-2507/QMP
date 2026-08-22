@@ -50,6 +50,9 @@ COMMON_PATHS = [
 class DiscoverApi(Tool):
     """Discover API endpoints by probing common paths."""
 
+    def __init__(self, auth_provider: Any | None = None) -> None:
+        self._auth_provider = auth_provider
+
     @property
     def name(self) -> str:
         return "discover_api"
@@ -98,8 +101,13 @@ class DiscoverApi(Tool):
                 for path in paths:
                     url = urljoin(base_url + "/", path.lstrip("/"))
                     try:
+                        # Apply auth headers if configured
+                        headers: dict[str, str] = {}
+                        if self._auth_provider:
+                            headers = self._auth_provider.apply_auth(headers, url)
+
                         start = time.monotonic()
-                        response = await client.request("GET", url)
+                        response = await client.request("GET", url, headers=headers)
                         elapsed_ms = int((time.monotonic() - start) * 1000)
 
                         # Keep endpoints that return real content (not 404/405/500)
