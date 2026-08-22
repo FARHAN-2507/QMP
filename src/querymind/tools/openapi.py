@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+import yaml
 
 from querymind.tools.base import Tool, ToolResult, ToolStatus
 
@@ -219,7 +220,7 @@ class ImportOpenApi(Tool):
         if parsed.scheme not in ("http", "https"):
             raise ValueError(f"Invalid URL scheme: {parsed.scheme}")
 
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True, verify=False) as client:
             response = await client.get(url)
             response.raise_for_status()
 
@@ -229,17 +230,21 @@ class ImportOpenApi(Tool):
         if "json" in content_type or url.endswith(".json"):
             return response.json()
 
-        # Try YAML if available
-        try:
-            return response.json()
-        except Exception:
-            pass
+        # Try YAML if content-type indicates yaml or url ends with .yaml/.yml
+        if "yaml" in content_type or url.endswith((".yaml", ".yml")):
+            return yaml.safe_load(response.text)
 
         # Try parsing as JSON anyway (some servers don't set content-type)
         try:
             return json.loads(response.text)
         except json.JSONDecodeError:
+            pass
+
+        # Try YAML as fallback
+        try:
+            return yaml.safe_load(response.text)
+        except yaml.YAMLError:
             raise ValueError(
                 f"Could not parse spec from {url}. "
-                f"Content-Type: {content_type}. Expected JSON."
+                f"Content-Type: {content_type}. Expected JSON or YAML."
             ) from None

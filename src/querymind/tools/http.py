@@ -67,7 +67,9 @@ class SendHttpRequest(Tool):
 
         try:
             start = time.monotonic()
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            async with httpx.AsyncClient(
+                timeout=timeout, follow_redirects=True, verify=False,
+            ) as client:
                 response = await client.request(
                     method=method,
                     url=url,
