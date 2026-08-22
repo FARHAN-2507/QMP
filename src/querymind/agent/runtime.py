@@ -13,10 +13,13 @@ from querymind.agent.loop import AgentLoop, AgentStepCallback
 from querymind.agent.state import AgentState
 from querymind.config.settings import settings
 from querymind.llm.client import LLMProvider
+from querymind.tools.discovery import DiscoverApi
 from querymind.tools.executor import ToolExecutor
 from querymind.tools.http import SendHttpRequest
 from querymind.tools.mock import GetCurrentTestEnvironment
+from querymind.tools.openapi import ImportOpenApi
 from querymind.tools.registry import ToolRegistry
+from querymind.tools.testing import RunTest
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +53,9 @@ class AgentRuntime:
         """Register the built-in tools."""
         self._registry.register(GetCurrentTestEnvironment())
         self._registry.register(SendHttpRequest())
+        self._registry.register(ImportOpenApi())
+        self._registry.register(DiscoverApi())
+        self._registry.register(RunTest())
 
     @property
     def registry(self) -> ToolRegistry:
