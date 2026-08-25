@@ -164,3 +164,107 @@ class GenerateTests(Tool):
                 status=ToolStatus.ERROR,
                 error=f"Test generation failed: {e}",
             )
+
+
+class GenerateTestsBatch(Tool):
+    """Generate test cases for a single endpoint (batch mode).
+
+    Use this tool instead of generate_tests when the API has many endpoints.
+    Call it once per endpoint to keep token usage low.
+    """
+
+    @property
+    def name(self) -> str:
+        return "generate_tests_batch"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Generate test cases for a SINGLE endpoint. Use this instead of "
+            "generate_tests when the API has many endpoints (>3). Call once "
+            "per endpoint, then run the returned tests. Saves tokens by "
+            "processing one endpoint at a time."
+        )
+
+    @property
+    def input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "base_url": {
+                    "type": "string",
+                    "description": "Base URL of the API",
+                },
+                "endpoint": {
+                    "type": "object",
+                    "description": "Single endpoint definition",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "method": {"type": "string"},
+                        "parameters": {"type": "array"},
+                        "request_body": {"type": "object"},
+                        "responses": {"type": "object"},
+                    },
+                    "required": ["path", "method"],
+                },
+                "run_immediately": {
+                    "type": "boolean",
+                    "description": "Run tests after generating (default: false)",
+                },
+            },
+            "required": ["base_url", "endpoint"],
+        }
+
+    async def execute(self, arguments: dict[str, Any]) -> ToolResult:
+        try:
+            base_url = arguments["base_url"]
+            endpoint = arguments["endpoint"]
+            run_immediately = arguments.get("run_immediately", False)
+
+            # Generate tests for single endpoint
+            test_cases = generate_tests_from_endpoints(base_url, [endpoint])
+
+            if not test_cases:
+                return ToolResult(
+                    status=ToolStatus.SUCCESS,
+                    data={"message": "No test cases generated", "count": 0},
+                )
+
+            # Run tests if requested
+            results = []
+            if run_immediately:
+                for tc in test_cases:
+                    result = await run_test(tc)
+                    results.append({  # pyright: ignore[reportUnknownMemberType]
+                        "test_name": result.test_name,
+                        "status": result.status.value,
+                        "passed": result.passed_count,
+                        "failed": result.failed_count,
+                        "summary": result.summary(),
+                    })
+
+            # Format output
+            test_summaries = []
+            for tc in test_cases:
+                test_summaries.append({  # pyright: ignore[reportUnknownMemberType]
+                    "name": tc.name,
+                    "method": tc.request.method,
+                    "url": tc.request.url,
+                    "assertions": len(tc.assertions),
+                })
+
+            return ToolResult(
+                status=ToolStatus.SUCCESS,
+                data={
+                    "endpoint": f"{endpoint.get('method', 'GET')} {endpoint.get('path', '/')}",
+                    "count": len(test_cases),
+                    "tests": test_summaries,
+                    "results": results if results else None,
+                },
+            )
+
+        except Exception as e:
+            return ToolResult(
+                status=ToolStatus.ERROR,
+                error=f"Test generation failed: {e}",
+            )

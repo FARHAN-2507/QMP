@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from querymind.agent.context import AgentContext
-from querymind.agent.loop import AgentLoop
+from querymind.agent.loop import AgentLoop, _compress_tool_result
 from querymind.agent.state import AgentState, AgentStatus
-from querymind.llm.client import ChatResponse, ToolCall
+from querymind.llm.client import ChatMessage, ChatResponse, Role, ToolCall
 from querymind.tools.executor import ToolExecutor
 from querymind.tools.mock import GetCurrentTestEnvironment
 from querymind.tools.registry import ToolRegistry
@@ -18,6 +18,7 @@ from querymind.tools.registry import ToolRegistry
 def make_loop(
     llm_response: ChatResponse,
     max_iterations: int = 5,
+    max_context_messages: int = 30,
 ) -> AgentLoop:
     """Create an AgentLoop with a mocked LLM."""
     reg = ToolRegistry()
@@ -33,6 +34,7 @@ def make_loop(
         context=context,
         executor=executor,
         max_iterations=max_iterations,
+        max_context_messages=max_context_messages,
     )
 
 
@@ -121,3 +123,63 @@ async def test_loop_llm_error() -> None:
 
     assert result.status == AgentStatus.ERROR
     assert "API down" in result.error
+
+
+# --- Context trimming tests ---
+
+
+@pytest.mark.asyncio
+async def test_loop_trims_context() -> None:
+    """Verify context is trimmed when exceeding max_context_messages."""
+    tool_response = ChatResponse(
+        tool_calls=[ToolCall(id="c1", name="get_current_test_environment", arguments={})],
+        finish_reason="tool_calls",
+    )
+    text_response = ChatResponse(content="Done!", finish_reason="stop")
+
+    reg = ToolRegistry()
+    reg.register(GetCurrentTestEnvironment())
+    context = AgentContext(tool_registry=reg)
+    executor = ToolExecutor(reg)
+
+    mock_llm = AsyncMock()
+    mock_llm.chat = AsyncMock(side_effect=[tool_response, text_response])
+
+    # Set low max_context_messages to trigger trimming
+    loop = AgentLoop(
+        llm=mock_llm, context=context, executor=executor,
+        max_iterations=5, max_context_messages=5,
+    )
+    state = AgentState()
+    state.add_user_message("test")
+
+    result = await loop.run(state)
+
+    # Should complete despite needing trimming
+    assert result.status == AgentStatus.COMPLETED
+
+
+def test_compress_tool_result() -> None:
+    """Verify tool result compression works."""
+    msg = ChatMessage(
+        role=Role.TOOL,
+        content="很长的tool result内容" * 100,
+        tool_call_id="c1",
+        name="send_request",
+    )
+    compressed = _compress_tool_result(msg)
+    assert compressed.name == "send_request"
+    assert "truncated" in compressed.content
+    assert len(compressed.content) < len(msg.content)
+
+
+def test_compress_tool_result_error() -> None:
+    """Verify error tool result compression."""
+    msg = ChatMessage(
+        role=Role.TOOL,
+        content="Error: something failed",
+        tool_call_id="c1",
+        name="run_test",
+    )
+    compressed = _compress_tool_result(msg)
+    assert "error" in compressed.content

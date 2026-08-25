@@ -11,7 +11,8 @@ from typing import Any
 from querymind.llm.client import ChatMessage, ToolDefinition
 from querymind.tools.registry import ToolRegistry
 
-DEFAULT_SYSTEM_PROMPT = """\
+# Full prompt — used on first call to establish behavior
+BOOTSTRAP_PROMPT = """\
 You are QueryMind, an AI API testing agent.
 
 CAPABILITIES:
@@ -66,6 +67,12 @@ TEST GENERATION STRATEGY:
 - Check response time is reasonable
 - Verify response structure matches schema
 
+TOKEN-SAVING MODE (for APIs with many endpoints):
+- Use generate_tests_batch instead of generate_tests
+- Call generate_tests_batch once per endpoint
+- Process endpoints sequentially, run tests after each batch
+- This keeps context small and saves tokens on free tier
+
 REPORT GENERATION:
 - After running tests, offer to generate a report
 - Use generate_report tool with the test results
@@ -80,6 +87,40 @@ RULES:
 - Keep tool calls minimal and purposeful.
 """
 
+# Compact prompt — used after first call (context already established)
+WORKING_PROMPT = """\
+You are QueryMind, an AI API testing agent.
+Be concise. Use tools to investigate, then report findings.
+
+RULES:
+- Never guess. Use tools to verify.
+- Be specific about what you found.
+- Keep tool calls minimal and purposeful.
+- Use markdown in final answers.
+"""
+
+# Tool sets for different phases — reduces token usage
+TOOL_SETS: dict[str, list[str]] = {
+    "setup": [
+        "configure_auth",
+        "list_auth",
+        "clear_auth",
+        "import_openapi",
+        "discover_api",
+    ],
+    "testing": [
+        "send_request",
+        "run_test",
+        "generate_tests",
+        "generate_tests_batch",
+        "run_smoke_tests",
+    ],
+    "reporting": [
+        "generate_report",
+    ],
+    "full": [],  # Empty means all tools
+}
+
 
 class AgentContext:
     """Builds the prompt and tool list for each LLM call."""
@@ -91,27 +132,62 @@ class AgentContext:
         auth_provider: Any | None = None,
     ) -> None:
         self._tool_registry = tool_registry
-        self._system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
+        self._bootstrap_prompt = system_prompt or BOOTSTRAP_PROMPT
         self._auth_provider = auth_provider
+        self._current_phase = "full"
+        self._call_count = 0
+
+    def set_phase(self, phase: str) -> None:
+        """Set the current tool phase to filter tool definitions."""
+        if phase in TOOL_SETS:
+            self._current_phase = phase
 
     def get_system_prompt(self) -> str:
-        """Return the system prompt with auth summary."""
-        prompt = self._system_prompt
+        """Return the system prompt with auth summary.
+
+        Uses compact working prompt after first call to save tokens.
+        """
+        prompt = WORKING_PROMPT if self._call_count > 0 else self._bootstrap_prompt
+
         if self._auth_provider:
             auth_summary = self._auth_provider.get_auth_summary()
             if auth_summary and auth_summary != "No authentication configured.":
                 prompt += f"\n\n{auth_summary}"
         return prompt
 
+    def increment_call_count(self) -> None:
+        """Track number of LLM calls for prompt consolidation."""
+        self._call_count += 1
+
     def get_tool_definitions(self) -> list[ToolDefinition]:
-        """Return tool definitions for the LLM."""
+        """Return tool definitions for the LLM.
+
+        Filters tools based on current phase to save tokens.
+        """
+        all_tools = self._tool_registry.list_tools()
+
+        # Filter by phase if not in full mode
+        if self._current_phase != "full":
+            allowed_names = TOOL_SETS.get(self._current_phase, [])
+            if allowed_names:
+                tools = [t for t in all_tools if t.name in allowed_names]
+                return [
+                    ToolDefinition(
+                        name=t.name,
+                        description=t.description,
+                        parameters=t.input_schema,
+                    )
+                    for t in tools
+                ]
+
+        # Full mode — return all tools
         return [
             ToolDefinition(
                 name=t.name,
                 description=t.description,
                 parameters=t.input_schema,
             )
-            for t in self._tool_registry.list_tools()
+            for t in all_tools
         ]
 
     def build_messages(

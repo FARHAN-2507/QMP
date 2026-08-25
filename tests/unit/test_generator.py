@@ -1,5 +1,7 @@
 """Tests for test generator module."""
 
+import pytest
+
 from querymind.testing.generator import (
     generate_crud_tests,
     generate_tests_from_endpoints,
@@ -84,3 +86,53 @@ def test_generate_preserves_base_url() -> None:
     endpoints = [{"path": "/test", "method": "GET"}]
     tests = generate_tests_from_endpoints("https://api.example.com/v1", endpoints)
     assert tests[0].request.url.startswith("https://api.example.com/v1")
+
+
+# --- GenerateTestsBatch tool tests ---
+
+
+@pytest.mark.asyncio
+async def test_batch_tool_generates_single_endpoint():
+    from querymind.tools.generator import GenerateTestsBatch
+
+    tool = GenerateTestsBatch()
+    result = await tool.execute({
+        "base_url": "http://localhost:3000",
+        "endpoint": {"path": "/api/users", "method": "GET"},
+    })
+    assert result.is_success
+    assert result.data["count"] >= 1
+    assert result.data["endpoint"] == "GET /api/users"
+
+
+@pytest.mark.asyncio
+async def test_batch_tool_with_post_endpoint():
+    from querymind.tools.generator import GenerateTestsBatch
+
+    tool = GenerateTestsBatch()
+    result = await tool.execute({
+        "base_url": "http://localhost:3000",
+        "endpoint": {
+            "path": "/api/users",
+            "method": "POST",
+            "request_body": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+        },
+    })
+    assert result.is_success
+    assert result.data["count"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_batch_tool_missing_endpoint():
+    from querymind.tools.generator import GenerateTestsBatch
+
+    tool = GenerateTestsBatch()
+    result = await tool.execute({
+        "base_url": "http://localhost:3000",
+    })
+    assert not result.is_success
+    assert "endpoint" in result.error

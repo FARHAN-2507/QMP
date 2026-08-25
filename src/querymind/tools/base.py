@@ -35,13 +35,19 @@ class ToolResult(BaseModel):
     def is_success(self) -> bool:
         return self.status == ToolStatus.SUCCESS
 
-    def to_content_string(self) -> str:
-        """Serialize to a string the LLM can read."""
+    def to_content_string(self, max_length: int = 4000) -> str:
+        """Serialize to a string the LLM can read.
+
+        Truncates large results to save tokens.
+        """
         if self.status == ToolStatus.SUCCESS:
-            if isinstance(self.data, str):
-                return self.data
-            return str(self.data)
-        return f"Error ({self.status}): {self.error or 'Unknown error'}"
+            result = self.data if isinstance(self.data, str) else str(self.data)
+        else:
+            result = f"Error ({self.status}): {self.error or 'Unknown error'}"
+
+        if len(result) > max_length:
+            return result[:max_length] + "\n... (truncated)"
+        return result
 
 
 class Tool(ABC):
