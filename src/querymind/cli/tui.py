@@ -193,7 +193,9 @@ def create_response_panel(response: str, is_error: bool = False) -> Panel:
     )
 
 
-def create_sessions_table(sessions: list[dict[str, str]], current_session: str | None = None) -> Panel:
+def create_sessions_table(
+    sessions: list[dict[str, str]], current_session: str | None = None
+) -> Panel:
     """Create a sessions table."""
     if not sessions:
         return Panel(

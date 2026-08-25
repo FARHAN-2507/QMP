@@ -26,6 +26,7 @@ from querymind.tools.mock import GetCurrentTestEnvironment
 from querymind.tools.openapi import ImportOpenApi
 from querymind.tools.registry import ToolRegistry
 from querymind.tools.report import GenerateReport
+from querymind.tools.smoke import RunSmokeTests
 from querymind.tools.testing import RunTest
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,7 @@ class AgentRuntime:
         self._registry.register(RunTest(auth_provider=self._auth_provider))
         self._registry.register(GenerateTests())
         self._registry.register(GenerateReport())
+        self._registry.register(RunSmokeTests(auth_provider=self._auth_provider))
         self._registry.register(ConfigureAuth(auth_provider=self._auth_provider))
         self._registry.register(ListAuth(auth_provider=self._auth_provider))
         self._registry.register(ClearAuth(auth_provider=self._auth_provider))

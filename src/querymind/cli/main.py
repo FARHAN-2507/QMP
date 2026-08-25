@@ -14,6 +14,7 @@ from rich.theme import Theme
 
 from querymind.agent.runtime import AgentRuntime
 from querymind.agent.state import AgentStatus
+from querymind.cli.smoke import smoke_command
 from querymind.cli.tui import (
     create_auth_table,
     create_banner,
@@ -42,8 +43,11 @@ app = typer.Typer(
     name="querymind",
     help="QueryMind - AI API Testing Agent",
     no_args_is_help=False,
+    invoke_without_command=True,
 )
 console = Console(theme=theme)
+
+app.command("smoke")(smoke_command)
 
 
 def make_runtime(on_step: object = None) -> AgentRuntime:
@@ -355,7 +359,7 @@ def run_interactive() -> None:
             console.print(f"\n[bold red]Unexpected error:[/bold red] {e}")
 
 
-@app.command()
+@app.callback(invoke_without_command=True)
 def main() -> None:
     """Launch QueryMind interactive session."""
     run_interactive()
