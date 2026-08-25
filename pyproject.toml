@@ -29,6 +29,9 @@ dependencies = [
     "groq>=0.11.0",
     "httpx>=0.27.0",
     "pyyaml>=6.0",
+    "fpdf2>=2.8.0",  # ApiSmokeTesting PDF reports
+    "fastapi>=0.115.0",  # Smoke web dashboard + API
+    "uvicorn[standard]>=0.30.0",  # ASGI server for dashboard
 ]
 
 [project.optional-dependencies]

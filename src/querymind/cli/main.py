@@ -15,6 +15,7 @@ from querymind.agent.state import AgentStatus
 from querymind.config.settings import settings
 from querymind.llm.groq import GroqProvider
 from querymind.security.models import AuthConfig, AuthType
+from querymind.smoke.cli import smoke_app
 from querymind.tools.base import ToolResult
 
 app = typer.Typer(
@@ -22,6 +23,7 @@ app = typer.Typer(
     help="QueryMind - AI API Testing Agent",
     no_args_is_help=False,
 )
+app.add_typer(smoke_app, name="smoke")
 console = Console()
 
 BANNER = """\
@@ -334,9 +336,11 @@ def run_interactive() -> None:
             console.print(f"\n[bold red]Unexpected error:[/bold red] {e}")
 
 
-@app.command()
-def main() -> None:
-    """Launch QueryMind interactive session."""
+@app.callback(invoke_without_command=True)
+def main(ctx: typer.Context) -> None:
+    """Launch QueryMind interactive session (default)."""
+    if ctx.invoked_subcommand is not None:
+        return
     run_interactive()
 
 
