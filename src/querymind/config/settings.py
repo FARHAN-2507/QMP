@@ -27,6 +27,12 @@ class Settings(BaseSettings):
         default="~/.querymind/.auth.json", alias="QUERYMIND_AUTH_CONFIG_PATH"
     )
 
+    # Smoke test settings
+    smoke_test_timeout_ms: int = Field(default=5000, alias="QUERYMIND_SMOKE_TEST_TIMEOUT_MS")
+    smoke_test_include_write: bool = Field(
+        default=False, alias="QUERYMIND_SMOKE_TEST_INCLUDE_WRITE"
+    )
+
     @property
     def groq_api_key_list(self) -> list[str]:
         """Parse comma-separated API keys into a list."""
