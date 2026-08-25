@@ -66,3 +66,18 @@ def test_tool_to_definition() -> None:
     assert d["type"] == "function"
     assert d["function"]["name"] == "dummy"
     assert d["function"]["description"] == "A dummy tool"
+
+
+def test_to_content_string_truncates_long_result() -> None:
+    long_data = "x" * 5000
+    r = ToolResult(status=ToolStatus.SUCCESS, data=long_data)
+    result = r.to_content_string(max_length=1000)
+    assert len(result) < 5000
+    assert "truncated" in result
+
+
+def test_to_content_string_no_truncation_when_short() -> None:
+    short_data = "hello"
+    r = ToolResult(status=ToolStatus.SUCCESS, data=short_data)
+    result = r.to_content_string(max_length=1000)
+    assert result == "hello"

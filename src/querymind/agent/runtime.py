@@ -20,7 +20,7 @@ from querymind.storage.session import SessionStore
 from querymind.tools.auth import ClearAuth, ConfigureAuth, ListAuth
 from querymind.tools.discovery import DiscoverApi
 from querymind.tools.executor import ToolExecutor
-from querymind.tools.generator import GenerateTests
+from querymind.tools.generator import GenerateTests, GenerateTestsBatch
 from querymind.tools.http import SendHttpRequest
 from querymind.tools.mock import GetCurrentTestEnvironment
 from querymind.tools.openapi import ImportOpenApi
@@ -87,6 +87,7 @@ class AgentRuntime:
         self._registry.register(DiscoverApi(auth_provider=self._auth_provider))
         self._registry.register(RunTest(auth_provider=self._auth_provider))
         self._registry.register(GenerateTests())
+        self._registry.register(GenerateTestsBatch())
         self._registry.register(GenerateReport())
         self._registry.register(RunSmokeTests(auth_provider=self._auth_provider))
         self._registry.register(ConfigureAuth(auth_provider=self._auth_provider))
@@ -123,6 +124,8 @@ class AgentRuntime:
                 raw_messages = data.get("messages", [])
                 self._state = AgentState()
                 self._state.messages = self._deserialize_messages(raw_messages)
+                # Compress old tool results to save tokens
+                self._compress_loaded_session()
                 logger.info("Loaded session %s (%d messages)", current_id, len(raw_messages))
                 return
 
@@ -247,6 +250,45 @@ class AgentRuntime:
             "Trimmed history: %d → %d messages",
             len(messages), len(self._state.messages),
         )
+
+    def _compress_loaded_session(self) -> None:
+        """Compress old tool results when loading a session.
+
+        Prevents old tool output from bloating the context.
+        Keeps only tool name and success/error status for old results.
+        """
+        if self._state is None:
+            return
+
+        messages = self._state.messages
+        if len(messages) <= 10:
+            return  # Small session, no compression needed
+
+        # Keep system message and first user message intact
+        # Compress tool results older than the last 6 messages
+        keep_recent = 6
+        for i, msg in enumerate(messages):
+            if msg.role.value == "tool" and i < len(messages) - keep_recent:
+                content = msg.content or ""
+                tool_name = msg.name or "unknown"
+
+                # Determine status
+                if "Error" in content or "error" in content.lower():
+                    status = "error"
+                elif len(content) > 100:
+                    status = "success (compressed)"
+                else:
+                    status = "success"
+
+                # Replace with compressed version
+                messages[i] = ChatMessage(
+                    role=Role.TOOL,
+                    content=f"[{tool_name}: {status}]",
+                    tool_call_id=msg.tool_call_id,
+                    name=msg.name,
+                )
+
+        logger.debug("Compressed loaded session tool results")
 
     def _deserialize_messages(self, raw_messages: list[dict[str, str]]) -> list[ChatMessage]:
         """Convert dict messages from JSON to ChatMessage objects."""
