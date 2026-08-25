@@ -1,32 +1,49 @@
-"""QueryMind CLI entry point."""
+"""QueryMind CLI entry point — modern TUI interface like OpenCode."""
 
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import typer
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.table import Table
+from rich.text import Text
+from rich.theme import Theme
 
 from querymind.agent.runtime import AgentRuntime
 from querymind.agent.state import AgentStatus
+from querymind.cli.tui import (
+    create_auth_table,
+    create_banner,
+    create_help_panel,
+    create_response_panel,
+    create_sessions_table,
+    create_status_bar,
+    create_tool_activity,
+)
 from querymind.config.settings import settings
 from querymind.llm.groq import GroqProvider
 from querymind.security.models import AuthConfig, AuthType
 from querymind.tools.base import ToolResult
+
+# Custom theme
+theme = Theme({
+    "info": "cyan",
+    "success": "green",
+    "warning": "yellow",
+    "error": "red",
+    "dim": "dim",
+    "bold": "bold",
+})
 
 app = typer.Typer(
     name="querymind",
     help="QueryMind - AI API Testing Agent",
     no_args_is_help=False,
 )
-console = Console()
-
-BANNER = """\
-[bold cyan]QueryMind[/bold cyan]
-[dim]AI API Testing Agent — Multi-turn with persistent memory[/dim]"""
+console = Console(theme=theme)
 
 
 def make_runtime(on_step: object = None) -> AgentRuntime:
@@ -35,15 +52,61 @@ def make_runtime(on_step: object = None) -> AgentRuntime:
     return AgentRuntime(llm=llm, on_step=on_step)  # type: ignore[arg-type]
 
 
-def format_tool_call(tool_name: str, arguments: dict[str, object]) -> str:
-    """Format a tool call for display."""
+def print_welcome(runtime: AgentRuntime | None = None) -> None:
+    """Print welcome screen."""
+    console.print()
+    console.print(create_banner())
+
+    # Status bar
+    if runtime:
+        status_bar = create_status_bar(
+            model=settings.groq_model,
+            session_id=runtime.session_id,
+            message_count=runtime.get_message_count(),
+            tool_count=10,
+        )
+        console.print(status_bar)
+    else:
+        console.print(
+            Text.from_markup(
+                f"[dim]Model: {settings.groq_model} | "
+                f"Keys: {len(settings.groq_api_key_list)}[/dim]"
+            )
+        )
+    console.print()
+
+    # Quick help
+    console.print(
+        Text.from_markup(
+            "[dim]Type a request or [bold]help[/bold] for commands. "
+            "[bold]exit[/bold] to quit.[/dim]"
+        )
+    )
+    console.print()
+
+
+def print_tool_call(tool_name: str, arguments: dict[str, Any]) -> None:
+    """Print tool call with animation."""
     if tool_name == "send_http_request":
         method = str(arguments.get("method", "?"))
         url = str(arguments.get("url", "?"))
-        return f"{method} {url}"
-    if tool_name == "get_current_test_environment":
-        return "Checking environment..."
-    return tool_name
+        details = f"{method} {url}"
+    elif tool_name == "generate_report":
+        details = "Generating HTML report..."
+    elif tool_name == "run_test":
+        details = f"Running test: {arguments.get('name', 'unknown')}"
+    elif tool_name == "generate_tests":
+        details = "Generating test suite..."
+    elif tool_name == "import_openapi":
+        details = f"Importing: {arguments.get('url', 'unknown')}"
+    elif tool_name == "discover_api":
+        details = f"Discovering: {arguments.get('base_url', 'unknown')}"
+    elif tool_name == "configure_auth":
+        details = f"Configuring: {arguments.get('auth_type', 'unknown')} auth"
+    else:
+        details = ""
+
+    console.print(create_tool_activity(tool_name, "running", details))
 
 
 def step_printer(iteration: int, tool_name: str, result: ToolResult) -> None:
@@ -63,98 +126,52 @@ def step_printer(iteration: int, tool_name: str, result: ToolResult) -> None:
 async def run_agent(runtime: AgentRuntime, user_input: str) -> None:
     """Run the agent on user input and display results."""
     console.print()
-    state = await runtime.run(user_input)
+
+    # Show thinking
+    with console.status("[bold cyan]Thinking...[/bold cyan]", spinner="dots"):
+        state = await runtime.run(user_input)
 
     if state.status == AgentStatus.COMPLETED and state.final_response:
         console.print()
         # Render markdown if it contains markdown syntax
         text = state.final_response
-        if any(c in text for c in ["#", "**", "`", "-"]):
+        if any(c in text for c in ["#", "**", "`", "-", "|"]):
             console.print(Markdown(text))
         else:
-            console.print(Panel(text, border_style="cyan", padding=(0, 1)))
+            console.print(create_response_panel(text))
     elif state.status == AgentStatus.ERROR:
-        console.print(f"\n[bold red]Error:[/bold red] {state.error}")
+        console.print(create_response_panel(f"Error: {state.error}", is_error=True))
     elif state.status == AgentStatus.MAX_ITERATIONS:
-        console.print(f"\n[yellow]{state.final_response}[/yellow]")
+        console.print(create_response_panel(state.final_response or "", is_error=True))
     else:
-        console.print(f"\n[dim]Agent stopped with status: {state.status}[/dim]")
+        console.print(f"[dim]Agent stopped with status: {state.status}[/dim]")
 
-    # Show tool call summary and session info
-    msg_count = runtime.get_message_count()
-    parts: list[str] = []
+    # Show tool call summary
     if state.tool_calls:
-        parts.append(
-            f"{len(state.tool_calls)} tool call"
-            f"{'s' if len(state.tool_calls) > 1 else ''}, "
-            f"{state.iteration} iterations"
+        tool_count = len(state.tool_calls)
+        console.print(
+            f"[dim]  {tool_count} tool call{'s' if tool_count > 1 else ''}, "
+            f"{state.iteration} iterations[/dim]"
         )
-    parts.append(f"{msg_count} messages")
-    if runtime.session_id:
-        parts.append(f"session:{runtime.session_id}")
-    console.print(f"[dim]({', '.join(parts)})[/dim]")
+    console.print()
 
 
 def show_sessions(runtime: AgentRuntime) -> None:
     """Display list of saved sessions."""
     sessions = runtime.list_sessions()
-    if not sessions:
-        console.print("[dim]No saved sessions.[/dim]")
-        return
-
-    table = Table(title="Saved Sessions", border_style="dim")
-    table.add_column("ID", style="cyan")
-    table.add_column("Last Updated")
-    table.add_column("Messages", justify="right")
-
-    for s in sessions:
-        is_current = s["session_id"] == runtime.session_id
-        sid = f"[bold]{s['session_id']}[/bold] *" if is_current else s["session_id"]
-        table.add_row(
-            sid,
-            s.get("updated_at", "unknown")[:19],
-            str(s.get("total_messages", 0)),
-        )
-
-    console.print(table)
-    console.print("[dim]* = current session[/dim]")
+    table_panel = create_sessions_table(sessions, runtime.session_id)
+    console.print(table_panel)
 
 
 def show_auth(runtime: AgentRuntime) -> None:
     """Display configured authentication."""
     configs = runtime.auth_provider.list_auth()
-    if not configs:
-        console.print("[dim]No authentication configured.[/dim]")
-        return
-
-    table = Table(title="Configured Authentication", border_style="dim")
-    table.add_column("Base URL", style="cyan")
-    table.add_column("Type")
-    table.add_column("Details")
-
-    for config in configs:
-        url = config.get("base_url", "unknown")
-        auth_type = config.get("type", "unknown")
-        details = ""
-        if auth_type == "api_key":
-            details = f"Key: {config.get('key_name', 'X-API-Key')}"
-        elif auth_type == "bearer":
-            details = f"Token: {config.get('token', '***')[:20]}..."
-        elif auth_type == "basic":
-            details = f"User: {config.get('username', '')}"
-        elif auth_type == "oauth2":
-            details = f"Client: {config.get('client_id', '')[:20]}..."
-
-        table.add_row(url, auth_type, details)
-
-    console.print(table)
+    table_panel = create_auth_table(configs)
+    console.print(table_panel)
 
 
 def parse_auth_command(args: str) -> tuple[str, str, dict[str, str]]:
-    """Parse auth command arguments.
-
-    Returns: (base_url, auth_type, options)
-    """
+    """Parse auth command arguments."""
     parts = args.split()
     if len(parts) < 2:
         return "", "", {}
@@ -177,10 +194,20 @@ def handle_auth_set(runtime: AgentRuntime, args: str) -> None:
 
     if not base_url or not auth_type_str:
         console.print(
-            "[red]Usage:[/red] auth set <base_url> <type> [options]\n"
-            "[dim]Types: api_key, bearer, basic, oauth2[/dim]\n"
-            "[dim]Options: --token=xxx --key-name=X-API-Key --key-value=xxx[/dim]\n"
-            "[dim]         --username=xxx --password=xxx[/dim]"
+            Panel(
+                Text.from_markup(
+                    "[bold]Usage:[/bold] auth set <base_url> <type> [options]\n\n"
+                    "[bold]Types:[/bold] api_key, bearer, basic, oauth2\n\n"
+                    "[bold]Options:[/bold]\n"
+                    "  --token=xxx          Bearer/OAuth2 token\n"
+                    "  --key-name=X-API-Key API key header name\n"
+                    "  --key-value=xxx      API key value\n"
+                    "  --username=xxx       Basic auth username\n"
+                    "  --password=xxx       Basic auth password"
+                ),
+                title="[bold]Auth Set[/bold]",
+                border_style="dim",
+            )
         )
         return
 
@@ -209,7 +236,7 @@ def handle_auth_set(runtime: AgentRuntime, args: str) -> None:
 
     runtime.auth_provider.set_auth(base_url, config)
     masked = config.mask_sensitive()
-    console.print(f"[green]Auth configured for {base_url} ({auth_type_str})[/green]")
+    console.print(f"[green]✓ Auth configured for {base_url} ({auth_type_str})[/green]")
     console.print(f"[dim]{masked}[/dim]")
 
 
@@ -219,44 +246,94 @@ def handle_auth_clear(runtime: AgentRuntime, args: str) -> None:
     if not base_url:
         # Clear all
         count = runtime.auth_provider.clear_all()
-        console.print(f"[green]Cleared {count} auth config(s).[/green]")
+        console.print(f"[green]✓ Cleared {count} auth config(s).[/green]")
     else:
         deleted = runtime.auth_provider.remove_auth(base_url)
         if deleted:
-            console.print(f"[green]Auth cleared for {base_url}[/green]")
+            console.print(f"[green]✓ Auth cleared for {base_url}[/green]")
         else:
             console.print(f"[dim]No auth found for {base_url}[/dim]")
 
 
+def handle_command(runtime: AgentRuntime, command: str) -> bool:
+    """Handle built-in commands. Returns True if command was handled."""
+    if command in ("exit", "quit", "q"):
+        console.print("[dim]Goodbye.[/dim]")
+        return True
+
+    if command == "clear":
+        runtime.reset()
+        console.clear()
+        print_welcome(runtime)
+        return False
+
+    if command == "sessions":
+        show_sessions(runtime)
+        return False
+
+    if command.startswith("load "):
+        session_id = command.split(" ", 1)[1].strip()
+        if runtime.load_session(session_id):
+            console.print(f"[green]✓ Loaded session {session_id}[/green]")
+            console.print(
+                f"[dim]  {runtime.get_message_count()} messages in history[/dim]"
+            )
+        else:
+            console.print(f"[red]✗ Session not found: {session_id}[/red]")
+        return False
+
+    if command == "new":
+        new_id = runtime.new_session()
+        console.print(f"[green]✓ New session: {new_id}[/green]")
+        return False
+
+    if command in ("auth", "auth list"):
+        show_auth(runtime)
+        return False
+
+    if command.startswith("auth set "):
+        handle_auth_set(runtime, command[9:])
+        return False
+
+    if command.startswith("auth clear"):
+        args = command[10:].strip()
+        handle_auth_clear(runtime, args)
+        return False
+
+    if command == "help":
+        console.print(create_help_panel())
+        return False
+
+    return False
+
+
 def run_interactive() -> None:
     """Run the interactive CLI session."""
-    console.print()
-    console.print(Panel(BANNER, border_style="cyan", padding=(1, 2)))
+    console.clear()
 
     if not settings.groq_api_key_list:
         console.print(
-            "[bold yellow]No API keys configured.[/bold yellow]\n"
-            "Set [cyan]GROQ_API_KEYS[/cyan] in your .env file.\n"
+            Panel(
+                Text.from_markup(
+                    "[bold yellow]No API keys configured.[/bold yellow]\n\n"
+                    "Set [cyan]GROQ_API_KEYS[/cyan] in your .env file:\n"
+                    "[dim]GROQ_API_KEYS=gsk_...[/dim]"
+                ),
+                title="[bold]Configuration[/bold]",
+                border_style="yellow",
+            )
         )
         raise typer.Exit(1)
 
     runtime = make_runtime(on_step=step_printer)
 
-    session_info = f"session:{runtime.session_id}" if runtime.session_id else "new session"
-    console.print(
-        f"[dim]Model: {settings.groq_model} | "
-        f"Keys: {len(settings.groq_api_key_list)} | "
-        f"{session_info}[/dim]\n"
-    )
-
-    console.print(
-        "Type a request or [bold]exit[/bold] to quit.\n"
-        "[dim]Example: test http://localhost:3000/api/health[/dim]\n"
-    )
+    # Print welcome with runtime info
+    print_welcome(runtime)
 
     while True:
         try:
-            user_input = console.input("[bold green]>[/bold green] ")
+            # Input with prompt
+            user_input = console.input("[bold green]❯[/bold green] ")
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]Goodbye.[/dim]")
             break
@@ -264,68 +341,12 @@ def run_interactive() -> None:
         command = user_input.strip()
         if not command:
             continue
-        if command in ("exit", "quit", "q"):
-            console.print("[dim]Goodbye.[/dim]")
-            break
-        if command == "clear":
-            runtime.reset()
-            console.clear()
-            console.print(f"[dim]New session: {runtime.session_id}[/dim]\n")
-            continue
-        if command == "sessions":
-            show_sessions(runtime)
-            continue
-        if command.startswith("load "):
-            session_id = command.split(" ", 1)[1].strip()
-            if runtime.load_session(session_id):
-                console.print(f"[green]Loaded session {session_id}[/green]")
-                console.print(f"[dim]({runtime.get_message_count()} messages in history)[/dim]\n")
-            else:
-                console.print(f"[red]Session not found: {session_id}[/red]")
-            continue
-        if command == "new":
-            new_id = runtime.new_session()
-            console.print(f"[green]New session: {new_id}[/green]\n")
-            continue
-        if command == "auth" or command == "auth list":
-            show_auth(runtime)
-            continue
-        if command.startswith("auth set "):
-            handle_auth_set(runtime, command[9:])
-            continue
-        if command.startswith("auth clear"):
-            args = command[10:].strip()
-            handle_auth_clear(runtime, args)
-            continue
-        if command == "help":
-            console.print(
-                Panel(
-                    "[bold]Commands[/bold]\n"
-                    "  [cyan]help[/cyan]        — Show this message\n"
-                    "  [cyan]clear[/cyan]       — Start new session\n"
-                    "  [cyan]new[/cyan]         — Start new session\n"
-                    "  [cyan]sessions[/cyan]    — List saved sessions\n"
-                    "  [cyan]load <id>[/cyan]   — Load a saved session\n"
-                    "  [cyan]auth[/cyan]        — Show configured authentication\n"
-                    "  [cyan]auth set[/cyan]    — Configure authentication\n"
-                    "  [cyan]auth clear[/cyan]  — Clear authentication\n"
-                    "  [cyan]exit[/cyan]        — Exit QueryMind\n\n"
-                    "[bold]Auth Examples[/bold]\n"
-                    "  [dim]auth set <url> bearer --token=eyJhbG...[/dim]\n"
-                    "  [dim]auth set <url> api-key --key-name=X-API-Key --key-value=abc[/dim]\n"
-                    "  [dim]auth set <url> basic --username=user --password=pass[/dim]\n"
-                    "  [dim]auth clear <url>[/dim]\n\n"
-                    "[bold]Testing Examples[/bold]\n"
-                    "  [dim]test http://localhost:3000/api/login[/dim]\n"
-                    "  [dim]now test the register endpoint[/dim]  (remembers previous context)\n"
-                    "  [dim]what did we test so far?[/dim]        (agent remembers)\n"
-                    "  [dim]sessions[/dim]                       (view all sessions)",
-                    title="Help",
-                    border_style="dim",
-                )
-            )
-            continue
 
+        # Handle built-in commands
+        if handle_command(runtime, command):
+            break
+
+        # Run agent
         try:
             asyncio.run(run_agent(runtime, command))
         except KeyboardInterrupt:
