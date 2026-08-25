@@ -202,10 +202,17 @@ class AgentRuntime:
     def _save_session(self) -> None:
         """Save current session to disk."""
         if self._session_id and self._state:
-            messages = [
-                {"role": m.role.value, "content": m.content or ""}
-                for m in self._state.messages
-            ]
+            messages: list[dict[str, str]] = []
+            for m in self._state.messages:
+                msg: dict[str, str] = {
+                    "role": m.role.value,
+                    "content": m.content or "",
+                }
+                if m.tool_call_id:
+                    msg["tool_call_id"] = m.tool_call_id
+                if m.name:
+                    msg["name"] = m.name
+                messages.append(msg)
             self._session_store.save(
                 self._session_id,
                 messages,
@@ -248,7 +255,12 @@ class AgentRuntime:
                 role = Role(role_str)
             except ValueError:
                 role = Role.USER
-            result.append(ChatMessage(role=role, content=msg.get("content", "")))
+            result.append(ChatMessage(
+                role=role,
+                content=msg.get("content", ""),
+                tool_call_id=msg.get("tool_call_id"),
+                name=msg.get("name"),
+            ))
         return result
 
     def get_tools_summary(self) -> str:
