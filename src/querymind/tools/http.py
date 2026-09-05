@@ -39,24 +39,15 @@ class SendHttpRequest(Tool):
             "properties": {
                 "method": {
                     "type": "string",
-                    "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
-                    "description": "HTTP method",
+                    "description": "HTTP method: GET, POST, PUT, PATCH, DELETE",
                 },
                 "url": {
                     "type": "string",
                     "description": "Full URL to send the request to",
                 },
-                "headers": {
-                    "type": "object",
-                    "description": "Optional HTTP headers as key-value pairs",
-                },
                 "body": {
                     "type": "object",
-                    "description": "Optional JSON body for POST/PUT/PATCH requests",
-                },
-                "timeout": {
-                    "type": "integer",
-                    "description": "Request timeout in seconds (default: 30)",
+                    "description": "Optional JSON body for POST/PUT/PATCH",
                 },
             },
             "required": ["method", "url"],
@@ -91,6 +82,23 @@ class SendHttpRequest(Tool):
                 resp_body = response.json()
             except Exception:
                 resp_body = response.text[:2000]
+
+            # Check for auth errors
+            if response.status_code in (401, 403):
+                return ToolResult(
+                    status=ToolStatus.AUTH_REQUIRED,
+                    error=(
+                        f"Authentication required ({response.status_code}). "
+                        "Use /auth set to configure credentials."
+                    ),
+                    data={
+                        "status_code": response.status_code,
+                        "body": resp_body,
+                        "url": url,
+                        "method": method,
+                    },
+                    metadata={"url": url, "method": method, "status": response.status_code},
+                )
 
             data = {
                 "status_code": response.status_code,

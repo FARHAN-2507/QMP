@@ -12,7 +12,6 @@ def test_http_tool_schema() -> None:
     assert schema["type"] == "object"
     assert "method" in schema["properties"]
     assert "url" in schema["properties"]
-    assert "GET" in schema["properties"]["method"]["enum"]
 
 
 @pytest.mark.asyncio

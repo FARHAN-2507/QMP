@@ -22,7 +22,7 @@ from querymind.llm.client import (
     Role,
     ToolCall,
 )
-from querymind.tools.base import ToolResult
+from querymind.tools.base import ToolResult, ToolStatus
 from querymind.tools.executor import ToolExecutor
 
 logger = logging.getLogger(__name__)
@@ -73,8 +73,22 @@ class AgentLoop:
             try:
                 response = await self._llm_call(state)
             except Exception as e:
+                error_msg = str(e)
                 logger.exception("LLM call failed on iteration %d", state.iteration)
-                state.set_error(f"LLM call failed: {e}")
+
+                # Handle specific error types
+                if "tool_use_failed" in error_msg or "Failed to parse tool call" in error_msg:
+                    state.set_error(
+                        "The AI generated an invalid tool call. "
+                        "Try a simpler request or break it into smaller steps."
+                    )
+                elif "rate_limit_exceeded" in error_msg:
+                    state.set_error(
+                        "Rate limit reached. Wait a moment and try again, "
+                        "or upgrade your Groq plan for higher limits."
+                    )
+                else:
+                    state.set_error(f"LLM call failed: {e}")
                 return state
 
             if not response.has_tool_calls:
@@ -86,9 +100,29 @@ class AgentLoop:
             tool_calls = response.tool_calls
             if response.content:
                 state.add_assistant_message(response.content)
+                # Show what the LLM is thinking
+                if self._on_step:
+                    from rich.console import Console
+                    console = Console()
+                    console.print(f"\n  [dim]💭 LLM:[/dim] {response.content[:200]}")
 
             for tc in tool_calls:
                 result = await self._execute_tool(tc)
+
+                # Handle auth required — stop loop and ask user
+                if result.status == ToolStatus.AUTH_REQUIRED:
+                    auth_msg = (
+                        "🔒 Authentication required!\n\n"
+                        f"The API returned: {result.error}\n\n"
+                        "Configure auth with:\n"
+                        "  /auth set <base_url> bearer --token=<your_token>\n"
+                        "  /auth set <base_url> api-key --key-name=X-API-Key --key-value=<key>\n\n"
+                        "Then try your request again."
+                    )
+                    state.add_tool_result(tc.id, auth_msg, tc.name)
+                    state.set_error(auth_msg)
+                    return state
+
                 tool_content = result.to_content_string(max_length=2000)
                 state.add_tool_result(tc.id, tool_content, tc.name)
                 state.record_tool_call(
