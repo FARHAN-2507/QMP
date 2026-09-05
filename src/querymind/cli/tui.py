@@ -115,6 +115,20 @@ def create_help_panel() -> Panel:
     help_text.append("        — Exit QueryMind\n", style="dim")
 
     help_text.append("\n", style="dim")
+    help_text.append("API Key Commands\n", style="bold cyan")
+    help_text.append("  ", style="dim")
+    help_text.append("/setkey <key>", style="bold green")
+    help_text.append("  — Add Groq API key\n", style="dim")
+
+    help_text.append("  ", style="dim")
+    help_text.append("/showkey", style="bold green")
+    help_text.append("       — Show configured keys\n", style="dim")
+
+    help_text.append("  ", style="dim")
+    help_text.append("/removekey <n>", style="bold green")
+    help_text.append(" — Remove key by index\n", style="dim")
+
+    help_text.append("\n", style="dim")
     help_text.append("Auth Examples\n", style="bold cyan")
     help_text.append("  ", style="dim")
     help_text.append("auth set <url> bearer --token=eyJhbG...\n", style="dim")

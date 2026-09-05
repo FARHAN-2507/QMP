@@ -21,6 +21,7 @@ class ToolStatus(StrEnum):
     ERROR = "error"
     PERMISSION_DENIED = "permission_denied"
     VALIDATION_ERROR = "validation_error"
+    AUTH_REQUIRED = "auth_required"
 
 
 class ToolResult(BaseModel):

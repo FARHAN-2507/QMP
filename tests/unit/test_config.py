@@ -10,7 +10,7 @@ def test_default_settings() -> None:
         MONGODB_CONNECTION_STRING="",
     )
     assert s.environment == "development"
-    assert s.max_agent_iterations == 20
+    assert s.max_agent_iterations == 50
     assert s.http_timeout_seconds == 30
     assert s.groq_model == "openai/gpt-oss-20b"
     assert s.mongodb_database_name == "QueryMind"

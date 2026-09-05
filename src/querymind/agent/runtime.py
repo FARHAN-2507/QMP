@@ -18,6 +18,7 @@ from querymind.llm.client import ChatMessage, LLMProvider, Role
 from querymind.security.provider import AuthProvider
 from querymind.storage.session import SessionStore
 from querymind.tools.auth import ClearAuth, ConfigureAuth, ListAuth
+from querymind.tools.curl import ParseCurl, RunCurl
 from querymind.tools.discovery import DiscoverApi
 from querymind.tools.executor import ToolExecutor
 from querymind.tools.generator import GenerateTests, GenerateTestsBatch
@@ -90,6 +91,8 @@ class AgentRuntime:
         self._registry.register(GenerateTestsBatch())
         self._registry.register(GenerateReport())
         self._registry.register(RunSmokeTests(auth_provider=self._auth_provider))
+        self._registry.register(ParseCurl())
+        self._registry.register(RunCurl(auth_provider=self._auth_provider))
         self._registry.register(ConfigureAuth(auth_provider=self._auth_provider))
         self._registry.register(ListAuth(auth_provider=self._auth_provider))
         self._registry.register(ClearAuth(auth_provider=self._auth_provider))
@@ -140,7 +143,7 @@ class AgentRuntime:
             return False
         return isinstance(data["messages"], list)
 
-    async def run(self, user_input: str) -> AgentState:
+    async def run(self, user_input: str, on_tool_call: Any = None) -> AgentState:
         """Run the agent on a user request.
 
         Reuses existing conversation state if available, enabling
@@ -152,6 +155,10 @@ class AgentRuntime:
 
         self._state.add_user_message(user_input)
         self._trim_history()
+
+        # Update the on_step callback if provided
+        if on_tool_call:
+            self._loop._on_step = on_tool_call
 
         self._state = await self._loop.run(self._state)
 
